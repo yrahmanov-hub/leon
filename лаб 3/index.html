@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Простая ферма — ООП на JS</title>
+  <style>
+    :root{
+      --cell-size:48px;
+      --grid-gap:2px;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    body{display:flex;gap:20px;padding:20px;background:#f3f6f8;color:#14202b}
+    .sidebar{width:260px}
+    h1{font-size:18px;margin:0 0 12px}
+    .toolbar{display:flex;flex-direction:column;gap:8px}
+    .toolbar button{padding:8px;border-radius:8px;border:1px solid #d0d7de;background:white;cursor:pointer}
+    .toolbar button.active{outline:3px solid #7dd3fc}
+    .grid-wrap{display:grid;grid-template-columns:1fr;align-items:start}
+    .grid{display:grid;grid-template-columns:repeat(12, var(--cell-size));grid-auto-rows:var(--cell-size);gap:var(--grid-gap);background:#cfe3ef;padding:8px;border-radius:8px}
+    .cell{width:var(--cell-size);height:var(--cell-size);display:flex;align-items:center;justify-content:center;user-select:none;font-size:18px;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.05)}
+    .hud{margin-top:12px;padding:10px;background:white;border-radius:8px;border:1px solid #e6eef6}
+    .legend{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .seed-select{display:flex;gap:8px}
+    .small{font-size:12px;color:#5b6b72}
+    .controls{display:flex;gap:8px;margin-top:8px}
+    .btn{padding:6px 8px;border-radius:6px;border:1px solid #d0d7de;background:white;cursor:pointer}
+    .status{margin-top:8px;font-size:13px}
+    .plant-emoji{pointer-events:none}
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h1>Ферма (ООП — JavaScript)</h1>
+    <div class="toolbar">
+      <div>
+        <div class="small">Инструменты</div>
+        <div class="controls">
+          <button id="tool-shovel" class="btn active">Лопата</button>
+          <button id="tool-seed" class="btn">Сеять</button>
+          <button id="tool-bucket" class="btn">Ведро</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="small">Выбрать семена</div>
+        <div class="seed-select">
+          <button class="btn seed-type active" data-plant="Bog">Болотник</button>
+          <button class="btn seed-type" data-plant="Potato">Картошка</button>
+          <button class="btn seed-type" data-plant="Cactus">Кактус</button>
+        </div>
+      </div>
+
+      <div class="hud">
+        <div><strong>Правила:</strong></div>
+        <ol style="padding-left:18px;margin:8px 0">
+          <li>Клетка может быть землей и/или водой.</li>
+          <li>Влажность клетки = сумма влияния ближайших водных блоков (с учётом расстояния).</li>
+          <li>Растения растут при подходящей влажности; иначе погибают.</li>
+          <li>Лопата — копать/засыпать, Сеять — посадка семян, Ведро — налить/взять воду.</li>
+        </ol>
+        <div class="small">Подсказка: кликом по клетке применяйте выбранный инструмент.</div>
+      </div>
+
+      <div class="hud" style="margin-top:10px">
+        <div><strong>Состояние ведра:</strong> <span id="bucket-state">пусто</span></div>
+        <div class="status">Симуляция: <span id="sim-running">вкл</span></div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="btn-reset" class="btn">Сброс</button>
+          <button id="btn-toggle-sim" class="btn">Пауза</button>
+        </div>
+      </div>
+
+      <div class="hud" style="margin-top:10px">
+        <div><strong>Легенда</strong></div>
+        <div class="legend">
+          <div style="display:flex;gap:6px;align-items:center"><div style="width:18px;height:18px;background:linear-gradient(90deg,#f7ecb5,#5c2e10);border-radius:3px;border:1px solid #aaa"></div><div class="small">влажность ↓ → ↑</div></div>
+          <div style="display:flex;gap:6px;align-items:center"><span>💧</span><div class="small">вода</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-wrap">
+    <div id="grid" class="grid" aria-live="polite"></div>
+  </div>
+
+  <script>
+    class Cell {
+      constructor(x, y) {
+        this.x = x; this.y = y;
+      
+        this.isSoil = true;       
+        this.isWaterBlock = false; 
+        
+        this.moisture = 0; 
+      
+        this.plant = null;
+      }
+      toggleSoil() {
+        
+        if (this.plant) return false;
+        this.isSoil = !this.isSoil;
+        
+        if (!this.isSoil) this.isWaterBlock = false;
+        return true;
+      }
+
+      toggleWater() {
+        this.isWaterBlock = !this.isWaterBlock;
+        return this.isWaterBlock;
+      }
+      tick(grid) {
+        this.calcMoisture(grid);
+        if (this.plant) {
+          this.plant.update(this.moisture);
+          if (!this.plant.alive) {
+            this.plant = null;
+          }
+        }
+      }
+      calcMoisture(grid) {
+        const R = 4; 
+        let sum = 0;
+        for (let dx = -R; dx <= R; dx++) {
+          for (let dy = -R; dy <= R; dy++) {
+            const nx = this.x + dx, ny = this.y + dy;
+            const other = grid.getCell(nx, ny);
+            if (!other) continue;
+            if (other.isWaterBlock) {
+              const dist = Math.hypot(dx, dy);
+            
+              const influence = dist === 0 ? 1.0 : Math.max(0, 1 / (dist));
+              sum += influence;
+            }
+          }
+        }
+        
+        const approxMax = 6; 
+        this.moisture = Math.min(1, sum / approxMax);
+      }
+      moistureColor() {
+        
+        const dry = hexToRgb('#f7ecb5');
+        const wet = hexToRgb('#5c2e10');
+        const t = this.moisture; // 0..1
+        const r = Math.round(lerp(dry.r, wet.r, t));
+        const g = Math.round(lerp(dry.g, wet.g, t));
+        const b = Math.round(lerp(dry.b, wet.b, t));
+        return `rgb(${r},${g},${b})`;
+      }
+    }
+    class Plant {
+      constructor() {
+        this.growth = 0; 
+        this.alive = true;
+        this.age = 0; 
+        
+        this.minMoisture = 0; this.maxMoisture = 1;
+        this.emoji = '🌱';
+        this.growthRate = 0.01; // базовая скорость
+      }
+
+      update(moisture) {
+        this.age++;
+
+        if (moisture < this.minMoisture || moisture > this.maxMoisture) {
+          if (!this._badCounter) this._badCounter = 0;
+          this._badCounter += 1;
+          if (this._badCounter > 6) this.alive = false; // 6 тиков
+          return;
+        }
+        this._badCounter = 0;
+        this.growth += this.growthRate + (moisture - this.minMoisture) * 0.02;
+        if (this.growth > 3) this.growth = 3;
+      }
+
+      view() {
+        const size = 14 + this.growth * 6; // пиксели
+        return `<div class="plant-emoji" style="font-size:${size}px">${this.emoji}</div>`;
+      }
+    }
+
+    class BogPlant extends Plant {
+      constructor() {
+        super();
+        this.minMoisture = 0.5;
+        this.maxMoisture = 1.0;
+        this.emoji = '🌾';
+        this.growthRate = 0.04;
+      }
+    }
+
+    class Potato extends Plant {
+      constructor() {
+        super();
+        this.minMoisture = 0.25;
+        this.maxMoisture = 0.7;
+        this.emoji = '🥔';
+        this.growthRate = 0.03;
+      }
+    }
+
+    class Cactus extends Plant {
+      constructor() {
+        super();
+        this.minMoisture = 0.0;
+        this.maxMoisture = 0.3;
+        this.emoji = '🌵';
+        this.growthRate = 0.02;
+      }
+    }
+
+    function hexToRgb(hex) {
+      const m = hex.replace('#','');
+      return {r: parseInt(m.substring(0,2),16), g: parseInt(m.substring(2,4),16), b: parseInt(m.substring(4,6),16)};
+    }
+    function lerp(a,b,t){return a+(b-a)*t}
+
+    class Grid {
+      constructor(cols, rows, container) {
+        this.cols = cols; this.rows = rows; this.container = container;
+        this.cells = [];
+        for (let y=0;y<rows;y++){
+          const row = [];
+          for (let x=0;x<cols;x++){
+            const c = new Cell(x,y);
+            row.push(c);
+          }
+          this.cells.push(row);
+        }
+        
+        this.cellEls = Array(cols).fill(null).map(()=>Array(rows).fill(null));
+        this.createDom();
+      }
+
+      createDom(){
+        this.container.innerHTML = '';
+        for (let y=0;y<this.rows;y++){
+          for (let x=0;x<this.cols;x++){
+            const el = document.createElement('div');
+            el.className = 'cell';
+            el.dataset.x = x; el.dataset.y = y;
+            el.addEventListener('click', ()=>onCellClick(x,y));
+            this.container.appendChild(el);
+            this.cellEls[x][y] = el;
+          }
+        }
+      }
+
+      getCell(x,y){
+        if (x<0||y<0||x>=this.cols||y>=this.rows) return null;
+        return this.cells[y][x];
+      }
+
+      tick(){
+        
+        for (let y=0;y<this.rows;y++){
+          for (let x=0;x<this.cols;x++){
+            this.cells[y][x].calcMoisture(this);
+          }
+        }
+        
+        for (let y=0;y<this.rows;y++){
+          for (let x=0;x<this.cols;x++){
+            this.cells[y][x].tick(this);
+          }
+        }
+        this.render();
+      }
+
+      render(){
+        for (let y=0;y<this.rows;y++){
+          for (let x=0;x<this.cols;x++){
+            const c = this.cells[y][x];
+            const el = this.cellEls[x][y];
+            
+            if (c.isWaterBlock) {
+              el.style.background = '#9fd8ff';
+            } else if (!c.isSoil) {
+              el.style.background = '#d6eaff';
+            } else {
+              el.style.background = c.moistureColor();
+            }
+            
+            let html = '';
+            if (c.isWaterBlock) html += '<div style="font-size:18px">💧</div>';
+            if (c.plant) html += c.plant.view();
+            el.innerHTML = html;
+          
+            el.title = `x:${c.x}, y:${c.y}\nsoil:${c.isSoil}\nwater:${c.isWaterBlock}\nmoist:${(c.moisture*100).toFixed(0)}%`;
+          
+            el.style.opacity = c.isSoil ? '1' : '0.6';
+          }
+        }
+      }
+
+      reset(){
+        for (let y=0;y<this.rows;y++) for (let x=0;x<this.cols;x++){
+          const c = this.cells[y][x];
+          c.isSoil = true; c.isWaterBlock = false; c.plant = null; c.moisture = 0; c.groundColor = null;
+        }
+        
+        const seeds = 8;
+        for (let i=0;i<seeds;i++){
+          const x = Math.floor(Math.random()*this.cols);
+          const y = Math.floor(Math.random()*this.rows);
+          this.getCell(x,y).isWaterBlock = true;
+        }
+        this.render();
+      }
+    }
+
+    
+    const GRID_COLS = 12, GRID_ROWS = 12;
+    const gridEl = document.getElementById('grid');
+    const grid = new Grid(GRID_COLS, GRID_ROWS, gridEl);
+
+    
+    let currentTool = 'shovel'; 
+    let selectedPlantType = 'Bog';
+    let bucketHasWater = false;
+    let simRunning = true;
+    const btnShovel = document.getElementById('tool-shovel');
+    const btnSeed = document.getElementById('tool-seed');
+    const btnBucket = document.getElementById('tool-bucket');
+    const seedButtons = document.querySelectorAll('.seed-type');
+    const bucketState = document.getElementById('bucket-state');
+    const btnReset = document.getElementById('btn-reset');
+    const btnToggleSim = document.getElementById('btn-toggle-sim');
+    const simRunningLabel = document.getElementById('sim-running');
+
+    function setActiveTool(t){
+      currentTool = t;
+      [btnShovel, btnSeed, btnBucket].forEach(b=>b.classList.remove('active'));
+      if (t==='shovel') btnShovel.classList.add('active');
+      if (t==='seed') btnSeed.classList.add('active');
+      if (t==='bucket') btnBucket.classList.add('active');
+    }
+    btnShovel.addEventListener('click', ()=>setActiveTool('shovel'));
+    btnSeed.addEventListener('click', ()=>setActiveTool('seed'));
+    btnBucket.addEventListener('click', ()=>setActiveTool('bucket'));
+
+    seedButtons.forEach(b=>b.addEventListener('click', ()=>{
+      seedButtons.forEach(s=>s.classList.remove('active'));
+      b.classList.add('active');
+      selectedPlantType = b.dataset.plant;
+      setActiveTool('seed');
+    }));
+
+    btnReset.addEventListener('click', ()=>{ grid.reset(); bucketHasWater=false; updateBucketUI(); });
+    btnToggleSim.addEventListener('click', ()=>{ simRunning = !simRunning; simRunningLabel.textContent = simRunning ? 'вкл' : 'пауза'; });
+
+    function updateBucketUI(){ bucketState.textContent = bucketHasWater ? 'с водой' : 'пусто'; }
+
+    
+    function onCellClick(x,y){
+      const cell = grid.getCell(x,y);
+      if (!cell) return;
+      if (currentTool === 'shovel'){
+        cell.toggleSoil();
+        grid.render();
+        return;
+      }
+      if (currentTool === 'seed'){
+        if (!cell.isSoil) return; 
+        if (cell.plant) return; 
+    
+        let plant = null;
+        if (selectedPlantType === 'Bog') plant = new BogPlant();
+        if (selectedPlantType === 'Potato') plant = new Potato();
+        if (selectedPlantType === 'Cactus') plant = new Cactus();
+        cell.plant = plant;
+        grid.render();
+        return;
+      }
+      if (currentTool === 'bucket'){
+        if (!bucketHasWater){
+          
+          if (cell.isWaterBlock){ bucketHasWater = true; cell.isWaterBlock = false; updateBucketUI(); grid.render(); }
+          else {
+            
+          }
+        } else {
+          
+        
+          cell.isWaterBlock = true;
+          bucketHasWater = false; updateBucketUI(); grid.render();
+        }
+        return;
+      }
+    }
+    grid.reset(); updateBucketUI();
+    setInterval(()=>{
+      if (simRunning) grid.tick();
+    }, 1000);
+    grid.render();
+  </script>
+</body>
+</html>
