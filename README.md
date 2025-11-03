@@ -183,4 +183,4 @@ reset() — сбрасывает поле и случайно добавляет
 Игра работает полностью в браузере и не требует внешних библиотек.
 
 
-https://github.com/yrahmanov-hub/leon/tree/8301b34d3e6393fd9e7da468e9e937f7709a3128
+https://github.com/yrahmanov-hub/leon/blob/main/%D0%BB%D0%B0%D0%B1%203/index.html
